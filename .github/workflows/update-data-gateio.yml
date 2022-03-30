@@ -1,0 +1,66 @@
+name: Update Data Gateio
+
+on: [push,workflow_dispatch]
+
+concurrency: 1
+
+jobs:
+
+  Download-Exchange-Data:
+    runs-on: ubuntu-latest
+    timeout-minutes: 1800
+    strategy:
+      fail-fast: false
+
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-python@v2
+        with:
+          python-version: 3.9
+
+      - name: Prep Git
+        run: |
+          git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git reset --hard HEAD
+          git status
+
+      - name: Gateio Backtesting Variables
+        id: gateio-dates
+        uses: falti/dotenv-action@v0.2.6
+        with:
+          log-variables: true
+          path:
+            backtesting-gateio.env
+
+      - name: Download Gateio Data (${{ steps.kucoin-dates.outputs.start_date }} - ${{ steps.kucoin-dates.outputs.end_date }})
+        id: gateio-data-download
+        env:
+          START_DATE: ${{ steps.gateio-dates.outputs.start_date }}
+          END_DATE: ${{ steps.gateio-dates.outputs.end_date }}
+          EXCHANGE: gateio
+        run: |
+          docker-compose run --rm download-data
+
+      - name: Fix File Ownership
+        run: |
+          sudo chown -R $(id -u):$(id -g) .
+
+      - name: Commit Gateio Changed Files
+        id: commit-gateio-changes
+        if: steps.gateio-data-download.outcome == 'success'
+        continue-on-error: true
+        run: |
+          git add gateio/*.json.gz
+          git commit -a -m "Update Gateio exchange data from ${{ steps.gateio-dates.outputs.start_date }} to ${{ steps.gateio-dates.outputs.end_date }}"
+
+      - name: Push changes
+        uses: ad-m/github-push-action@master
+        if: steps.commit-gateio-changes.outcome == 'success'
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          branch: ${{ github.ref }}
